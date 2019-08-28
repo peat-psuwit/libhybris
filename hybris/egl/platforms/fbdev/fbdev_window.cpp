@@ -24,14 +24,21 @@
 #include <stdio.h>
 #include <string.h>
 
+#if ANDROID_VERSION_MAJOR>=4 && ANDROID_VERSION_MINOR>=2 || ANDROID_VERSION_MAJOR>=5
+extern "C" {
+#include <sync/sync.h>
+};
+#endif
+
+#include <hybris/gralloc/gralloc.h>
+
 #define FRAMEBUFFER_PARTITIONS 2
 
 static pthread_cond_t _cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t _mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
-FbDevNativeWindowBuffer::FbDevNativeWindowBuffer(alloc_device_t* alloc_device,
-                            unsigned int width,
+FbDevNativeWindowBuffer::FbDevNativeWindowBuffer(unsigned int width,
                             unsigned int height,
                             unsigned int format,
                             unsigned int usage)
@@ -42,13 +49,8 @@ FbDevNativeWindowBuffer::FbDevNativeWindowBuffer(alloc_device_t* alloc_device,
     ANativeWindowBuffer::usage  = usage;
     busy = 0;
     status = 0;
-    m_alloc = alloc_device;
 
-    if (m_alloc) {
-        status = m_alloc->alloc(m_alloc,
-                            width, height, format, usage,
-                            &handle, &stride);
-    }
+    hybris_gralloc_allocate(width, height, format, usage, &handle, (uint32_t*)&stride);
 
     TRACE("width=%d height=%d stride=%d format=x%x usage=x%x status=%s this=%p",
         width, height, stride, format, usage, strerror(-status), this);
@@ -59,31 +61,26 @@ FbDevNativeWindowBuffer::FbDevNativeWindowBuffer(alloc_device_t* alloc_device,
 FbDevNativeWindowBuffer::~FbDevNativeWindowBuffer()
 {
     TRACE("%p", this);
-    if (m_alloc && handle)
-        m_alloc->free(m_alloc, handle);
+    hybris_gralloc_release(handle, 1);
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
-FbDevNativeWindow::FbDevNativeWindow( alloc_device_t* alloc,
-                            framebuffer_device_t* fbDev)
+FbDevNativeWindow::FbDevNativeWindow()
 {
-    m_alloc = alloc;
-    m_fbDev = fbDev;
-    m_bufFormat = m_fbDev->format;
+    m_bufFormat = hybris_gralloc_fbdev_format();
     m_usage = GRALLOC_USAGE_HW_FB;
     m_bufferCount = 0;
     m_allocateBuffers = true;
 
 #if ANDROID_VERSION_MAJOR>=4 && ANDROID_VERSION_MINOR>=2 || ANDROID_VERSION_MAJOR>=5
-    if (m_fbDev->numFramebuffers>0)
-        setBufferCount(m_fbDev->numFramebuffers);
+    if (hybris_gralloc_fbdev_framebuffer_count() > 0)
+        setBufferCount(hybris_gralloc_fbdev_framebuffer_count());
     else
         setBufferCount(FRAMEBUFFER_PARTITIONS);
 #else
     setBufferCount(FRAMEBUFFER_PARTITIONS);
 #endif
-
 }
 
 
@@ -122,7 +119,7 @@ void FbDevNativeWindow::destroyBuffers()
 int FbDevNativeWindow::setSwapInterval(int interval)
 {
     TRACE("interval=%i", interval);
-    return m_fbDev->setSwapInterval(m_fbDev, interval);
+    return hybris_gralloc_fbdev_setSwapInterval(interval);
 }
 
 
@@ -261,9 +258,19 @@ int FbDevNativeWindow::queueBuffer(BaseNativeWindowBuffer* buffer, int fenceFd)
 
     pthread_mutex_unlock(&_mutex);
 
+#if ANDROID_VERSION_MAJOR>=4 && ANDROID_VERSION_MINOR>=2 || ANDROID_VERSION_MAJOR>=5
+    HYBRIS_TRACE_BEGIN("fbdev-platform", "queueBuffer_waiting_for_fence", "-%p", fbnb);
+    if (fenceFd >= 0)
+    {
+        sync_wait(fenceFd, -1);
+        close(fenceFd);
+    }
+    HYBRIS_TRACE_END("fbdev-platform", "queueBuffer_waiting_for_fence", "-%p", fbnb);
+#endif
+
     HYBRIS_TRACE_BEGIN("fbdev-platform", "queueBuffer-post", "-%p", fbnb);
 
-    int rv = m_fbDev->post(m_fbDev, fbnb->handle);
+    int rv = hybris_gralloc_fbdev_post(fbnb->handle);
     if (rv!=0)
     {
         fprintf(stderr,"ERROR: fb->post(%s)\n",strerror(-rv));
@@ -358,7 +365,7 @@ int FbDevNativeWindow::lockBuffer(BaseNativeWindowBuffer* buffer)
  */
 unsigned int FbDevNativeWindow::width() const
 {
-    unsigned int rv = m_fbDev->width;
+    unsigned int rv = hybris_gralloc_fbdev_width();
     TRACE("width=%i", rv);
     return rv;
 }
@@ -369,7 +376,7 @@ unsigned int FbDevNativeWindow::width() const
  */
 unsigned int FbDevNativeWindow::height() const
 {
-    unsigned int rv = m_fbDev->height;
+    unsigned int rv = hybris_gralloc_fbdev_height();
     TRACE("height=%i", rv);
     return rv;
 }
@@ -380,7 +387,7 @@ unsigned int FbDevNativeWindow::height() const
  */
 unsigned int FbDevNativeWindow::format() const
 {
-    unsigned int rv = m_fbDev->format;
+    unsigned int rv = hybris_gralloc_fbdev_format();
     TRACE("format=x%x", rv);
     return rv;
 }
@@ -397,7 +404,7 @@ unsigned int FbDevNativeWindow::format() const
  */
 unsigned int FbDevNativeWindow::defaultHeight() const
 {
-    unsigned int rv = m_fbDev->height;
+    unsigned int rv = hybris_gralloc_fbdev_height();
     TRACE("height=%i", rv);
     return rv;
 }
@@ -408,7 +415,7 @@ unsigned int FbDevNativeWindow::defaultHeight() const
  */
 unsigned int FbDevNativeWindow::defaultWidth() const
 {
-    unsigned int rv = m_fbDev->width;
+    unsigned int rv = hybris_gralloc_fbdev_width();
     TRACE("width=%i", rv);
     return rv;
 }
@@ -443,7 +450,13 @@ unsigned int FbDevNativeWindow::transformHint() const
     return 0;
 }
 
-
+/*
+ * returns the current usage of this window
+ */
+unsigned int FbDevNativeWindow::getUsage() const
+{
+    return m_usage;
+}
 
 /*
  *  native_window_set_usage(..., usage)
@@ -499,9 +512,8 @@ void FbDevNativeWindow::reallocateBuffers()
 
     for(unsigned int i = 0; i < m_bufferCount; i++)
     {
-        FbDevNativeWindowBuffer *fbnb = new FbDevNativeWindowBuffer(m_alloc,
-                            m_fbDev->width, m_fbDev->height, m_fbDev->format,
-                            m_usage|GRALLOC_USAGE_HW_FB );
+        FbDevNativeWindowBuffer *fbnb = new FbDevNativeWindowBuffer(hybris_gralloc_fbdev_width(),
+                            hybris_gralloc_fbdev_height(), hybris_gralloc_fbdev_format(), m_usage|GRALLOC_USAGE_HW_FB);
 
         fbnb->common.incRef(&fbnb->common);
 
