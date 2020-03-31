@@ -72,6 +72,12 @@ AC_ARG_ENABLE(mesa,
   [mesa="no"])
 AM_CONDITIONAL( [WANT_MESA], [test x"$mesa" = x"yes"])
 
+AC_ARG_ENABLE(ubuntu-camera-headers,
+  [  --enable-ubuntu-camera-headers            Enable Ubuntu camera headers (default=disabled)],
+  [ubuntu-camera-headers=$enableval],
+  [ubuntu-camera-headers="no"])
+AM_CONDITIONAL( [WANT_UBUNTU_CAMERA_HEADERS], [test x"$ubuntu-camera-headers" = x"yes"])
+
 AC_ARG_ENABLE(wayland,
   [  --enable-wayland            Enable wayland support (default=disabled)],
   [wayland=$enableval
@@ -222,6 +228,7 @@ AC_SUBST(ANDROID_VERSION_PATCH, [$android_headers_patch])
 AC_MSG_NOTICE("Android headers version is $android_headers_major.$android_headers_minor.$android_headers_patch")
 
 # Add automake tests for version/API needs here that you need in code, including test .am's
+AM_CONDITIONAL([HAS_ANDROID_9_0_0], [test $android_headers_major -ge 9 -a $android_headers_minor -ge 0 ])
 AM_CONDITIONAL([HAS_ANDROID_8_0_0], [test $android_headers_major -ge 8 -a $android_headers_minor -ge 0 ])
 AM_CONDITIONAL([HAS_ANDROID_7_0_0], [test $android_headers_major -ge 7 -a $android_headers_minor -ge 0 ])
 AM_CONDITIONAL([HAS_ANDROID_6_0_0], [test $android_headers_major -ge 6 -a $android_headers_minor -ge 0 ])
