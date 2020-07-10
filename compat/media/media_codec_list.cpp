@@ -34,6 +34,21 @@
 
 using namespace android;
 
+#if ANDROID_VERSION_MAJOR>=5
+namespace {
+    sp<MediaCodecInfo> & get_and_cache_codecinfo_at(size_t index) {
+        static thread_local size_t codec_info_index = 0;
+        static thread_local sp<MediaCodecInfo> codec_info = NULL;
+
+        if (index != codec_info_index || codec_info == NULL) {
+            codec_info_index = index;
+            codec_info = MediaCodecList::getInstance()->getCodecInfo(index);
+        }
+        return codec_info;
+    }
+}
+#endif
+
 ssize_t media_codec_list_find_codec_by_type(const char *type, bool encoder, size_t startIndex)
 {
     REPORT_FUNCTION()
@@ -61,7 +76,7 @@ const char *media_codec_list_get_codec_name(size_t index)
 {
     REPORT_FUNCTION()
 #if ANDROID_VERSION_MAJOR>=5
-    return MediaCodecList::getInstance()->getCodecInfo(index)->getCodecName();
+    return get_and_cache_codecinfo_at(index)->getCodecName();
 #else
     return MediaCodecList::getInstance()->getCodecName(index);
 #endif
@@ -71,7 +86,7 @@ bool media_codec_list_is_encoder(size_t index)
 {
     REPORT_FUNCTION()
 #if ANDROID_VERSION_MAJOR>=5
-    return MediaCodecList::getInstance()->getCodecInfo(index)->isEncoder();
+    return get_and_cache_codecinfo_at(index)->isEncoder();
 #else
     return MediaCodecList::getInstance()->isEncoder(index);
 #endif
@@ -83,7 +98,7 @@ size_t media_codec_list_get_num_supported_types(size_t index)
 
     Vector<AString> types;
 #if ANDROID_VERSION_MAJOR>=5
-    MediaCodecList::getInstance()->getCodecInfo(index)->getSupportedMimes(&types);
+    get_and_cache_codecinfo_at(index)->getSupportedMimes(&types);
 #else
     status_t err = MediaCodecList::getInstance()->getSupportedTypes(index, &types);
     if (err != OK)
@@ -103,7 +118,7 @@ size_t media_codec_list_get_nth_supported_type_len(size_t index, size_t n)
 
     Vector<AString> types;
 #if ANDROID_VERSION_MAJOR>=5
-    MediaCodecList::getInstance()->getCodecInfo(index)->getSupportedMimes(&types);
+    get_and_cache_codecinfo_at(index)->getSupportedMimes(&types);
 #else
     status_t err = MediaCodecList::getInstance()->getSupportedTypes(index, &types);
 #endif
@@ -123,7 +138,7 @@ int media_codec_list_get_nth_supported_type(size_t index, char *type, size_t n)
 
     Vector<AString> types;
 #if ANDROID_VERSION_MAJOR>=5
-    MediaCodecList::getInstance()->getCodecInfo(index)->getSupportedMimes(&types);
+    get_and_cache_codecinfo_at(index)->getSupportedMimes(&types);
 #else
     status_t err = MediaCodecList::getInstance()->getSupportedTypes(index, &types);
 #endif
@@ -149,8 +164,8 @@ static void media_codec_list_get_num_codec_capabilities(size_t index, const char
     Vector<uint32_t> color_formats;
     ALOGD("index: %d, type: '%s'", index, type);
 #if ANDROID_VERSION_MAJOR>=5
-    MediaCodecList::getInstance()->getCodecInfo(index)->getCapabilitiesFor(type)->getSupportedProfileLevels(&profile_levels);
-    MediaCodecList::getInstance()->getCodecInfo(index)->getCapabilitiesFor(type)->getSupportedColorFormats(&color_formats);
+    get_and_cache_codecinfo_at(index)->getCapabilitiesFor(type)->getSupportedProfileLevels(&profile_levels);
+    get_and_cache_codecinfo_at(index)->getCapabilitiesFor(type)->getSupportedColorFormats(&color_formats);
 #elif ANDROID_VERSION_MAJOR==4 && ANDROID_VERSION_MINOR<=3
     status_t err = MediaCodecList::getInstance()->getCodecCapabilities(index, type, &profile_levels, &color_formats);
 #else
@@ -220,7 +235,7 @@ int media_codec_list_get_nth_codec_profile_level(size_t index, const char *type,
 #endif
     Vector<uint32_t> formats;
 #if ANDROID_VERSION_MAJOR>=5
-    MediaCodecList::getInstance()->getCodecInfo(index)->getCapabilitiesFor(type)->getSupportedProfileLevels(&profile_levels);
+    get_and_cache_codecinfo_at(index)->getCapabilitiesFor(type)->getSupportedProfileLevels(&profile_levels);
 #elif ANDROID_VERSION_MAJOR==4 && ANDROID_VERSION_MINOR<=3
     status_t err = MediaCodecList::getInstance()->getCodecCapabilities(index, type, &profile_levels, &formats);
 #else
@@ -256,7 +271,7 @@ int media_codec_list_get_codec_color_formats(size_t index, const char *type, uin
 #endif
     Vector<uint32_t> formats;
 #if ANDROID_VERSION_MAJOR>=5
-    MediaCodecList::getInstance()->getCodecInfo(index)->getCapabilitiesFor(type)->getSupportedColorFormats(&formats);
+    get_and_cache_codecinfo_at(index)->getCapabilitiesFor(type)->getSupportedColorFormats(&formats);
 #elif ANDROID_VERSION_MAJOR==4 && ANDROID_VERSION_MINOR<=3
     status_t err = MediaCodecList::getInstance()->getCodecCapabilities(index, type, &profile_levels, &formats);
 #else
